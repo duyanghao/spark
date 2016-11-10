@@ -126,4 +126,9 @@ package object constants {
     s"$INIT_CONTAINER_PROPERTIES_FILE_DIR/$INIT_CONTAINER_PROPERTIES_FILE_NAME"
   private[spark] val DEFAULT_SHUFFLE_MOUNT_NAME = "shuffle"
   private[spark] val INIT_CONTAINER_SECRET_VOLUME_NAME = "spark-init-secret"
+
+  // TPR
+  private[spark] val TPR_API_VERSION = "apache.io/v1"
+  private[spark] val TPR_API_ENDPOINT = s"apis/%s/namespaces/%s/sparkjobs"
+  private[spark] val TPR_KIND = "SparkJob"
 }
