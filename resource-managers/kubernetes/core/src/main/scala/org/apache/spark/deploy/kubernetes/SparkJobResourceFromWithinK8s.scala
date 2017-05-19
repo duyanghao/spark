@@ -27,34 +27,6 @@ import org.apache.spark.deploy.kubernetes.tpr.TPRCrudCalls
 private[spark] class SparkJobResourceClientFromWithinK8s(
     client: KubernetesClient) extends TPRCrudCalls {
 
-  private val protocol: String = "https://"
-
-  // we can also get the host from the environment variable
-  private val kubeHost: String = {
-    val host = Try(sys.env("KUBERNETES_SERVICE_HOST")) match {
-      case Success(h) => Option(h)
-      case Failure(_) => None
-    }
-    host.map(h => h).getOrElse {
-      // Log a warning just in case, but this should almost certainly never happen
-      logWarning("Error while retrieving k8s host address")
-      "127.0.0.1"
-    }
-  }
-
-  // the port from the environment variable
-  private val kubeHostPort: String = {
-    val port = Try(sys.env("KUBERNETES_PORT_443_TCP_PORT")) match {
-      case Success(p) => Option(p)
-      case Failure(_) => None
-    }
-    port.map(p => p).getOrElse {
-      // Log a warning just in case, but this should almost certainly never happen
-      logWarning("Error while retrieving k8s host port")
-      "8001"
-    }
-  }
-
   // Since this will be running inside a pod
   // we can access the pods token and use it with the Authorization header when
   // making rest calls to the k8s Api
@@ -68,7 +40,6 @@ private[spark] class SparkJobResourceClientFromWithinK8s(
   }
 
   override protected val k8sClient: KubernetesClient = client
-  override protected val kubeMaster: String = s"$protocol$kubeHost:$kubeHostPort"
 }
 
 private[spark] class SparkJobResourceClientFromOutsideK8s(

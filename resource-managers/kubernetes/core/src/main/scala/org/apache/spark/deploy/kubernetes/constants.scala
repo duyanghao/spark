@@ -128,7 +128,7 @@ package object constants {
   private[spark] val INIT_CONTAINER_SECRET_VOLUME_NAME = "spark-init-secret"
 
   // TPR
-  private[spark] val TPR_API_VERSION = "apache.io/v1"
-  private[spark] val TPR_API_ENDPOINT = s"apis/%s/namespaces/%s/sparkjobs"
+  private[spark] val TPR_API_GROUP = "apache.io"
+  private[spark] val TPR_API_VERSION = "v1"
   private[spark] val TPR_KIND = "SparkJob"
 }

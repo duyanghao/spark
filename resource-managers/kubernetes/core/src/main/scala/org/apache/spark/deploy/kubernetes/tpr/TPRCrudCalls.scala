@@ -19,7 +19,7 @@ package org.apache.spark.deploy.kubernetes.tpr
 import java.util.concurrent.{ThreadPoolExecutor, TimeUnit}
 
 import io.fabric8.kubernetes.client.{BaseClient, KubernetesClient}
-import okhttp3.{MediaType, OkHttpClient, Request, RequestBody, Response}
+import okhttp3.{HttpUrl, MediaType, OkHttpClient, Request, RequestBody, Response}
 import okio.{Buffer, BufferedSource}
 import org.json4s.{DefaultFormats, Formats}
 import org.json4s.JsonDSL._
@@ -46,7 +46,7 @@ private[spark] case class Metadata(name: String,
 private[spark] case class SparkJobState(apiVersion: String,
                                         kind: String,
                                         metadata: Metadata,
-                                        spec: Map[String, Any])
+                                        status: Map[String, Any])
 
 private[spark] case class WatchObject(`type`: String, `object`: SparkJobState)
 
@@ -57,70 +57,14 @@ private[spark] abstract class TPRCrudCalls extends Logging {
 
   implicit val formats: Formats = DefaultFormats + JobStateSerDe
 
-
   protected val httpClient: OkHttpClient =
-    buildOkhttpClientFromWithinPod(k8sClient.asInstanceOf[BaseClient])
+    extractHttpClientFromK8sClient(k8sClient.asInstanceOf[BaseClient])
 
   protected val namespace: String = k8sClient.getNamespace
   private var watchSource: BufferedSource = _
   private lazy val buffer = new Buffer()
   protected implicit val ec: ThreadPoolExecutor = ThreadUtils
     .newDaemonCachedThreadPool("tpr-watcher-pool")
-
-  private def executeBlocking(cb: => WatchObject): Future[WatchObject] = {
-    val p = Promise[WatchObject]()
-    ec.execute(new Runnable {
-      override def run(): Unit = {
-        try {
-          p.trySuccess(blocking(cb))
-        } catch {
-          case e: Throwable => p.tryFailure(e)
-        }
-      }
-    })
-    p.future
-  }
-
-  private def completeRequest(partialReq: Request.Builder): Request = {
-    kubeToken match {
-      case Some(tok) => partialReq.addHeader("Authorization", s"Bearer $tok").build()
-      case None => partialReq.build()
-    }
-  }
-
-  private def completeRequestWithExceptionIfNotSuccessful(
-      requestType: String,
-      response: Response,
-      additionalInfo: Option[Seq[String]] = None): Unit = {
-
-    if (!response.isSuccessful) {
-      response.body().close()
-      val msg = new ArrayBuffer[String]
-      msg += s"Failed to $requestType resource."
-
-      additionalInfo match {
-        case Some(info) =>
-          for (extraMsg <- info) {
-            msg += extraMsg
-          }
-        case None =>
-      }
-
-      val finalMessage = msg.mkString(" ")
-      logError(finalMessage)
-      throw new SparkException(finalMessage)
-    }
-  }
-
-  def buildOkhttpClientFromWithinPod(client: BaseClient): OkHttpClient = {
-    val field = classOf[BaseClient].getDeclaredField("httpClient")
-    try {
-      field.setAccessible(true)
-      field.get(client).asInstanceOf[OkHttpClient]
-    } finally {
-      field.setAccessible(false)
-    }
-  }
 
   def createJobObject(name: String, keyValuePairs: Map[String, Any]): Unit = {
     val resourceObject =
@@ -129,11 +73,16 @@ private[spark] abstract class TPRCrudCalls extends Logging {
 
     val requestBody = RequestBody
       .create(MediaType.parse("application/json"), compact(render(payload)))
+
+    val requestSegments = Seq(
+      "apis", TPR_API_GROUP, TPR_API_VERSION, "namespaces", namespace, "sparkjobs")
+    val url = generateHttpUrl(requestSegments)
+
     val request = completeRequest(new Request.Builder()
       .post(requestBody)
-      .url(s"$kubeMaster/${TPR_API_ENDPOINT.format(TPR_API_VERSION, namespace)}"))
+      .url(url))
 
-    logDebug(s"Create Request: $request")
+    logDebug(s"Create SparkJobResource Request: $request")
     val response = httpClient.newCall(request).execute()
     completeRequestWithExceptionIfNotSuccessful(
       "post",
@@ -146,9 +95,13 @@ private[spark] abstract class TPRCrudCalls extends Logging {
   }
 
   def deleteJobObject(tprObjectName: String): Unit = {
+    val requestSegments = Seq(
+      "apis", TPR_API_GROUP, TPR_API_VERSION, "namespaces", namespace, "sparkjobs", tprObjectName)
+    val url = generateHttpUrl(requestSegments)
+
     val request = completeRequest(new Request.Builder()
       .delete()
-      .url(s"$kubeMaster/${TPR_API_ENDPOINT.format(TPR_API_VERSION, namespace)}/$tprObjectName"))
+      .url(url))
 
     logDebug(s"Delete Request: $request")
     val response = httpClient.newCall(request).execute()
@@ -162,9 +115,13 @@ private[spark] abstract class TPRCrudCalls extends Logging {
   }
 
   def getJobObject(name: String): SparkJobState = {
+    val requestSegments = Seq(
+      "apis", TPR_API_GROUP, TPR_API_VERSION, "namespaces", namespace, "sparkjobs", name)
+    val url = generateHttpUrl(requestSegments)
+
     val request = completeRequest(new Request.Builder()
       .get()
-      .url(s"$kubeMaster/${TPR_API_ENDPOINT.format(TPR_API_VERSION, namespace)}/$name"))
+      .url(url))
 
     logDebug(s"Get Request: $request")
     val response = httpClient.newCall(request).execute()
@@ -185,9 +142,14 @@ private[spark] abstract class TPRCrudCalls extends Logging {
       RequestBody.create(
         MediaType.parse("application/json-patch+json"),
         compact(render(payload)))
+
+    val requestSegments = Seq(
+      "apis", TPR_API_GROUP, TPR_API_VERSION, "namespaces", namespace, "sparkjobs", name)
+    val url = generateHttpUrl(requestSegments)
+
     val request = completeRequest(new Request.Builder()
       .patch(requestBody)
-      .url(s"$kubeMaster/${TPR_API_ENDPOINT.format(TPR_API_VERSION, namespace)}/$name"))
+      .url(url))
 
     logDebug(s"Update Request: $request")
     val response = httpClient.newCall(request).execute()
@@ -201,16 +163,20 @@ private[spark] abstract class TPRCrudCalls extends Logging {
     logDebug(s"Successfully patched resource $name.")
   }
 
-  /**
-    * This method has an helper method that blocks to watch the object.
-    * The future is completed on a Delete event or source exhaustion.
-    * This method relies on the assumption of one sparkjob per namespace
-    */
+/**
+ * This method has an helper method that blocks to watch the object.
+ * The future is completed on a Delete event or source exhaustion.
+ * This method relies on the assumption of one sparkjob per namespace
+ */
   def watchJobObject(): Future[WatchObject] = {
     val watchClient = httpClient.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
+    val requestSegments = Seq(
+      "apis", TPR_API_GROUP, TPR_API_VERSION, "namespaces", namespace, "sparkjobs")
+    val url = generateHttpUrl(requestSegments, Seq(("watch", "true")))
+
     val request = completeRequest(new Request.Builder()
       .get()
-      .url(s"$kubeMaster/${TPR_API_ENDPOINT.format(TPR_API_VERSION, namespace)}?watch=true"))
+      .url(url))
 
     logDebug(s"Watch Request: $request")
     val resp = watchClient.newCall(request).execute()
@@ -223,10 +189,10 @@ private[spark] abstract class TPRCrudCalls extends Logging {
     watchJobObjectUtil(resp)
   }
 
-  /**
-    * This method has a blocking call - wait on SSE - inside it.
-    * However it is sent off in a new thread
-    */
+/**
+ * This method has a blocking call - wait on SSE - inside it.
+ * However it is sent off in a new thread
+ */
   private def watchJobObjectUtil(response: Response): Future[WatchObject] = {
     @volatile var wo: WatchObject = null
     watchSource = response.body().source()
@@ -266,6 +232,74 @@ private[spark] abstract class TPRCrudCalls extends Logging {
       buffer.close()
       watchSource.close()
     }
+  }
+
+  private def completeRequest(partialReq: Request.Builder): Request = {
+    kubeToken match {
+      case Some(tok) => partialReq.addHeader("Authorization", s"Bearer $tok").build()
+      case None => partialReq.build()
+    }
+  }
+
+  private def generateHttpUrl(urlSegments: Seq[String],
+    querySegments: Seq[(String, String)] = Seq.empty[(String, String)]): HttpUrl = {
+
+    val urlBuilder = HttpUrl.parse(kubeMaster).newBuilder
+    urlSegments map { pathSegment =>
+      urlBuilder.addPathSegment(pathSegment)
+    }
+    querySegments map {
+      case (query, value) => urlBuilder.addQueryParameter(query, value)
+    }
+    urlBuilder.build()
+  }
+
+  private def completeRequestWithExceptionIfNotSuccessful(
+    requestType: String,
+    response: Response,
+    additionalInfo: Option[Seq[String]] = None): Unit = {
+
+    if (!response.isSuccessful) {
+      response.body().close()
+      val msg = new ArrayBuffer[String]
+      msg += s"Failed to $requestType resource."
+
+      additionalInfo match {
+        case Some(info) =>
+          for (extraMsg <- info) {
+            msg += extraMsg
+          }
+        case None =>
+      }
+
+      val finalMessage = msg.mkString(" ")
+      logError(finalMessage)
+      throw new SparkException(finalMessage)
+    }
+  }
+
+  def extractHttpClientFromK8sClient(client: BaseClient): OkHttpClient = {
+    val field = classOf[BaseClient].getDeclaredField("httpClient")
+    try {
+      field.setAccessible(true)
+      field.get(client).asInstanceOf[OkHttpClient]
+    } finally {
+      field.setAccessible(false)
+    }
+  }
+
+  private def executeBlocking(cb: => WatchObject): Future[WatchObject] = {
+    val p = Promise[WatchObject]()
+    ec.execute(new Runnable {
+      override def run(): Unit = {
+        try {
+          p.trySuccess(blocking(cb))
+        } catch {
+          case e: Throwable => p.tryFailure(e)
+        }
+      }
+    })
+    p.future
   }
 
 }
