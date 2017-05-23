@@ -1,5 +1,5 @@
 metadata:
-  name: spark-job.apache.io
+  name: spark-job.apache.org
   labels:
     resource: spark-job
     object: spark

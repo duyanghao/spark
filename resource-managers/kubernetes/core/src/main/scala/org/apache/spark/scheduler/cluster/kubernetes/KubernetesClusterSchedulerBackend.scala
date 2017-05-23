@@ -30,10 +30,10 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 import org.apache.spark.{SparkContext, SparkEnv, SparkException}
-import org.apache.spark.deploy.kubernetes.{ConfigurationUtils, SparkJobResourceClientFromWithinK8s, SparkPodInitContainerBootstrap}
+import org.apache.spark.deploy.kubernetes.{ConfigurationUtils, SparkPodInitContainerBootstrap}
 import org.apache.spark.deploy.kubernetes.config._
 import org.apache.spark.deploy.kubernetes.constants._
-import org.apache.spark.deploy.kubernetes.tpr.{JobState, WatchObject}
+import org.apache.spark.deploy.kubernetes.tpr.{JobState, TPRCrudCalls, WatchObject}
 import org.apache.spark.rpc.{RpcCallContext, RpcEndpointAddress, RpcEnv}
 import org.apache.spark.scheduler.TaskSchedulerImpl
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages.{RetrieveSparkAppConfig, SparkAppConfig}
@@ -176,7 +176,7 @@ private[spark] class KubernetesClusterSchedulerBackend(
   private val resourceWatcherPool = ExecutionContext.fromExecutorService(
     ThreadUtils.newDaemonFixedThreadPool(2, "resource-watcher-pool"))
 
-  private val sparkJobResourceCtrller = new SparkJobResourceClientFromWithinK8s(kubernetesClient)
+  private val sparkJobResourceCtrller = new TPRCrudCalls(kubernetesClient)
 
   private def getInitialTargetExecutorNumber(defaultNumExecutors: Int = 1): Int = {
     if (Utils.isDynamicAllocationEnabled(conf)) {

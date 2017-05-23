@@ -27,8 +27,7 @@ import org.apache.spark.{SparkConf, SparkException}
 import org.apache.spark.deploy.kubernetes.config._
 import org.apache.spark.deploy.kubernetes.constants._
 import org.apache.spark.deploy.kubernetes.submit.{LoggingPodStatusWatcher, LoggingPodStatusWatcherImpl}
-import org.apache.spark.deploy.kubernetes.SparkJobResourceClientFromOutsideK8s
-import org.apache.spark.deploy.kubernetes.tpr.JobState
+import org.apache.spark.deploy.kubernetes.tpr.{JobState, TPRCrudCalls}
 import org.apache.spark.deploy.rest.kubernetes.v2.ResourceStagingServerSslOptionsProviderImpl
 import org.apache.spark.deploy.rest.kubernetes.ResourceStagingServerSslOptionsProviderImpl
 import org.apache.spark.internal.Logging
@@ -78,10 +77,9 @@ private[spark] class Client(
     org.apache.spark.internal.config.DRIVER_JAVA_OPTIONS)
 
   // create resource of kind - SparkJob representing the deployed spark app
-  private val sparkJobCtrller = new SparkJobResourceClientFromOutsideK8s(
-    kubernetesClientProvider.get)
+  private val sparkJobCtrller = new TPRCrudCalls(kubernetesClientProvider.get)
   private val jobResourceName = s"sparkJob-${sparkConf.get(KUBERNETES_NAMESPACE)}-$appName"
-  private val keyValuePairs = Map(
+  private val statusMap = Map(
     "image" -> driverDockerImage,
     "state" -> JobState.QUEUED,
     "numExecutors" -> sparkConf.getInt("spark.executor.instances", 1),
@@ -92,7 +90,7 @@ private[spark] class Client(
   // TODO: in the latter case we can attempt a retry depending on the rc
   // This also assumes that once we fail at creation, we won't bother trying
   // anything on the resource for the lifetime of the app
-  Try(sparkJobCtrller.createJobObject(jobResourceName, keyValuePairs)) match {
+  Try(sparkJobCtrller.createJobObject(jobResourceName, statusMap)) match {
     case Success(_) => sparkConf.set("spark.kubernetes.jobResourceSet", "true")
       sparkConf.set("spark.kubernetes.jobResourceName", jobResourceName)
     case Failure(_: SparkException) => // if e.getMessage startsWith "40" =>

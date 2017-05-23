@@ -22,10 +22,10 @@ import org.json4s.JsonAST.JNull
 
 import org.apache.spark.deploy.kubernetes.tpr.JobState.JobState
 
- /**
-  * JobState Serializer and Deserializer
-  * */
-object JobStateSerDe extends CustomSerializer[JobState](_ =>
+/**
+ * JobState Serializer and Deserializer
+ */
+private[spark] object JobStateSerDe extends CustomSerializer[JobState](_ =>
   ({
     case JString("SUBMITTED") => JobState.SUBMITTED
     case JString("QUEUED") => JobState.QUEUED

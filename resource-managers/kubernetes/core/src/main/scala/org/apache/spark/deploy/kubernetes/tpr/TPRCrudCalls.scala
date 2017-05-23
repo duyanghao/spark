@@ -34,36 +34,40 @@ import org.apache.spark.internal.Logging
 import org.apache.spark.SparkException
 import org.apache.spark.util.ThreadUtils
 
-/**
- * Isolated this since the method is called on the client machine
- */
-
 private[spark] case class Metadata(name: String,
-                                   uid: Option[String] = None,
-                                   labels: Option[Map[String, String]] = None,
-                                   annotations: Option[Map[String, String]] = None)
+    uid: Option[String] = None,
+    labels: Option[Map[String, String]] = None,
+    annotations: Option[Map[String, String]] = None)
 
 private[spark] case class SparkJobState(apiVersion: String,
-                                        kind: String,
-                                        metadata: Metadata,
-                                        status: Map[String, Any])
+    kind: String,
+    metadata: Metadata,
+    status: Map[String, Any])
 
 private[spark] case class WatchObject(`type`: String, `object`: SparkJobState)
 
-private[spark] abstract class TPRCrudCalls extends Logging {
-  protected val k8sClient: KubernetesClient
-  protected val kubeMaster: String = KUBERNETES_MASTER_INTERNAL_URL
-  protected val kubeToken: Option[String] = None
+/**
+ * CRUD + Watch Operations on SparkJob Resource
+ *
+ * This class contains all CRUD+Watch implementations performed
+ * on the SparkJob Resource used to expose the state of a spark job
+ * in kubernetes (visible via kubectl or through the k8s dashboard).
+ *
+ *
+ */
+private[spark] class TPRCrudCalls(k8sClient: KubernetesClient,
+    kubeToken: Option[String] = None) extends Logging {
+  private val kubeMaster: String = KUBERNETES_MASTER_INTERNAL_URL
 
   implicit val formats: Formats = DefaultFormats + JobStateSerDe
 
-  protected val httpClient: OkHttpClient =
+  private val httpClient: OkHttpClient =
     extractHttpClientFromK8sClient(k8sClient.asInstanceOf[BaseClient])
 
-  protected val namespace: String = k8sClient.getNamespace
+  private val namespace: String = k8sClient.getNamespace
   private var watchSource: BufferedSource = _
   private lazy val buffer = new Buffer()
-  protected implicit val ec: ThreadPoolExecutor = ThreadUtils
+  private implicit val ec: ThreadPoolExecutor = ThreadUtils
     .newDaemonCachedThreadPool("tpr-watcher-pool")
 
   def createJobObject(name: String, keyValuePairs: Map[String, Any]): Unit = {
@@ -166,7 +170,7 @@ private[spark] abstract class TPRCrudCalls extends Logging {
 /**
  * This method has an helper method that blocks to watch the object.
  * The future is completed on a Delete event or source exhaustion.
- * This method relies on the assumption of one sparkjob per namespace
+ * This method also relies on the assumption of one sparkjob per namespace
  */
   def watchJobObject(): Future[WatchObject] = {
     val watchClient = httpClient.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
