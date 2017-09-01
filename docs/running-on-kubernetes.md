@@ -798,6 +798,34 @@ from the other deployment modes. See the [configuration page](configuration.html
     the Driver process. The user can specify multiple of these to set multiple environment variables.
   </td>
 </tr>
+<tr>
+  <td><code>spark.kubernetes.client.watch.reconnectIntervalInMs</code></td>
+  <td><code>1s</code></td>
+  <td>
+    Connection retry interval for kubernetes client requests.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.client.watch.reconnectLimit</code></td>
+  <td><code>-1</code></td>
+  <td>
+    Limit of times connections can be attempted for kubernetes client requests.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.client.connection.timeoutInMs</code></td>
+  <td><code>10s</code></td>
+  <td>
+    Connection timeout for kubernetes client requests.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.client.request.timeoutInMs</code></td>
+  <td><code>10s</code></td>
+  <td>
+    Request timeout for kubernetes client requests.
+  </td>
+</tr>
 </table>
 
 
