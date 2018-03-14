@@ -1,3 +1,16 @@
+## Before you submit a Pull Request
+The Kubernetes scheduler backend is currently being upstreamed to the main [Apache Spark project](https://github.com/apache/spark).
+We are attempting to re-direct as much new development as possible to the upstream.
+Please consider whether your pull request can be submitted against the Apache Spark project, and submit there if possible.
+
+If you have any questions about whether a PR should be submitted upstream or against this fork,
+please feel free to reach out on the following channels:
+
+* Apache Spark developer mailing list: dev@spark.apache.org
+* Apache Spark [JIRA](https://issues.apache.org/jira/)
+* Big Data SIG [slack channel](https://kubernetes.slack.com/)
+* Regular Big Data SIG [meetings](https://github.com/kubernetes/community/tree/master/sig-big-data)
+
 ## What changes were proposed in this pull request?
 
 (Please fill in changes proposed in this fix)

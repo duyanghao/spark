@@ -24,6 +24,8 @@ should give you a list of pods and configmaps (if any) respectively.
 * You must have a spark distribution with Kubernetes support. This may be obtained from the
 [release tarball](https://github.com/apache-spark-on-k8s/spark/releases) or by
 [building Spark with Kubernetes support](../resource-managers/kubernetes/README.md#building-spark-with-kubernetes-support).
+* You must have [Kubernetes DNS](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/) configured in
+your cluster.
 
 ## Driver & Executor Images
 
@@ -59,7 +61,7 @@ to the registry.
 For example, if the registry host is `registry-host` and the registry is listening on port 5000:
 
     cd $SPARK_HOME
-    docker build -t registry-host:5000/spark-base:latest -f dockerfiles/driver/spark-base .
+    docker build -t registry-host:5000/spark-base:latest -f dockerfiles/spark-base/Dockerfile .
     docker build -t registry-host:5000/spark-driver:latest -f dockerfiles/driver/Dockerfile .
     docker build -t registry-host:5000/spark-executor:latest -f dockerfiles/executor/Dockerfile .
     docker build -t registry-host:5000/spark-init:latest -f dockerfiles/init-container/Dockerfile .
@@ -220,7 +222,7 @@ Below is an example submission:
       local:///opt/spark/examples/src/main/python/pi.py 100
 ```
 
-## Dynamic Executor Scaling
+## Dynamic Allocation in Kubernetes
 
 Spark on Kubernetes supports Dynamic Allocation with cluster mode. This mode requires running
 an external shuffle service. This is typically a [daemonset](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
@@ -243,6 +245,7 @@ the command may then look like the following:
       --class org.apache.spark.examples.GroupByTest \
       --master k8s://<k8s-master>:<port> \
       --kubernetes-namespace default \
+      --conf spark.local.dir=/tmp/spark-local
       --conf spark.app.name=group-by-test \
       --conf spark.kubernetes.driver.docker.image=kubespark/spark-driver:latest \
       --conf spark.kubernetes.executor.docker.image=kubespark/spark-executor:latest \
@@ -251,6 +254,14 @@ the command may then look like the following:
       --conf spark.kubernetes.shuffle.namespace=default \
       --conf spark.kubernetes.shuffle.labels="app=spark-shuffle-service,spark-version=2.2.0" \
       local:///opt/spark/examples/jars/spark-examples_2.11-2.2.0-k8s-0.3.0.jar 10 400000 2
+
+The external shuffle service has to mount directories that can be shared with the executor pods. The provided example
+YAML spec mounts a hostPath volume to the external shuffle service pods, but these hostPath volumes must also be mounted
+into the executors. When using the external shuffle service, the directories specified in the `spark.local.dir`
+configuration are mounted as hostPath volumes into all of the executor containers. To ensure that one does not
+accidentally mount the incorrect hostPath volumes, the value of `spark.local.dir` must be specified in your
+application's configuration when using Kubernetes, even though it defaults to the JVM's temporary directory when using
+other cluster managers.
 
 ## Advanced
 
@@ -605,48 +616,6 @@ from the other deployment modes. See the [configuration page](configuration.html
   </td>
 </tr>
 <tr>
-  <td><code>spark.kubernetes.driver.labels</code></td>
-  <td>(none)</td>
-  <td>
-    <i>Deprecated.</i> Use <code>spark.kubernetes.driver.label.<labelKey></code> instead which supports <code>=</code>
-    and <code>,</code> characters in label values.
-    Custom labels that will be added to the driver pod. This should be a comma-separated list of label key-value pairs,
-    where each label is in the format <code>key=value</code>. Note that Spark also adds its own labels to the driver pod
-    for bookkeeping purposes.
-  </td>
-</tr>
-<tr>
-  <td><code>spark.kubernetes.driver.annotations</code></td>
-  <td>(none)</td>
-  <td>
-    <i>Deprecated.</i> Use <code>spark.kubernetes.driver.annotation.<annotationKey></code> instead which supports
-    <code>=</code> and <code>,</code> characters in annotation values.
-    Custom annotations that will be added to the driver pod. This should be a comma-separated list of label key-value
-    pairs, where each annotation is in the format <code>key=value</code>.
-  </td>
-</tr>
-<tr>
-  <td><code>spark.kubernetes.executor.labels</code></td>
-  <td>(none)</td>
-  <td>
-    <i>Deprecated.</i> Use <code>spark.kubernetes.executor.label.<labelKey></code> instead which supports
-    <code>=</code> and <code>,</code> characters in label values.
-    Custom labels that will be added to the executor pods. This should be a comma-separated list of label key-value
-    pairs, where each label is in the format <code>key=value</code>. Note that Spark also adds its own labels to the
-    executor pods for bookkeeping purposes.
-  </td>
-</tr>
-<tr>
-  <td><code>spark.kubernetes.executor.annotations</code></td>
-  <td>(none)</td>
-  <td>
-    <i>Deprecated.</i> Use <code>spark.kubernetes.executor.annotation.<annotationKey></code> instead which supports
-    <code>=</code> and <code>,</code> characters in annotation values.
-    Custom annotations that will be added to the executor pods. This should be a comma-separated list of annotation
-    key-value pairs, where each annotation is in the format <code>key=value</code>.
-  </td>
-</tr>
-<tr>
   <td><code>spark.kubernetes.driver.pod.name</code></td>
   <td>(none)</td>
   <td>
@@ -783,6 +752,61 @@ from the other deployment modes. See the [configuration page](configuration.html
   </td>
 </tr>
 <tr>
+  <td><code>spark.kubernetes.kerberos.enabled</code></td> 
+  <td>false</td>
+  <td>
+    Specify whether your job requires a Kerberos Authentication to access HDFS. By default, we
+    will assume that you will not require secure HDFS access. 
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.kerberos.keytab</code></td> 
+  <td>(none)</td>
+  <td>
+    Assuming you have set <code>spark.kubernetes.kerberos.enabled</code> to be true. This will let you specify 
+    the location of your Kerberos keytab to be used in order to access Secure HDFS. This is optional as you 
+    may login by running <code>kinit</code> before running the spark-submit, and the submission client
+    will look within your local TGT cache to resolve this. 
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.kerberos.principal</code></td> 
+  <td>(none)</td>
+  <td>
+    Assuming you have set <code>spark.kubernetes.kerberos.enabled</code> to be true. This will let you specify 
+    your Kerberos principal that you wish to use to access Secure HDFS. This is optional as you 
+    may login by running <code>kinit</code> before running the spark-submit, and the submission client
+    will look within your local TGT cache to resolve this. 
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.kerberos.renewer.principal</code></td> 
+  <td>(none)</td>
+  <td>
+    Assuming you have set <code>spark.kubernetes.kerberos.enabled</code> to be true. This will let you specify 
+    the principal that you wish to use to handle renewing of Delegation Tokens. This is optional as 
+    we will set the principal to be the job users principal by default.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.kerberos.tokensecret.name</code></td> 
+  <td>(none)</td>
+  <td>
+    Assuming you have set <code>spark.kubernetes.kerberos.enabled</code> to be true. This will let you specify 
+    the name of the secret where your existing delegation token data is stored. You must also specify the 
+    item key <code>spark.kubernetes.kerberos.tokensecret.itemkey</code> where your data is stored on the secret. 
+    This is optional in the case that you want to use pre-existing secret, otherwise a new secret will be automatically
+    created.
+  </td>
+</tr>
+<tr>
+  <td><code>spark.kubernetes.kerberos.tokensecret.itemkey</code></td> 
+  <td>spark.kubernetes.kerberos.dt.label</td>
+  <td>
+    Assuming you have set <code>spark.kubernetes.kerberos.enabled</code> to be true. This will let you specify 
+    the data item key name within the pre-specified secret where the data of your existing delegation token data is stored. 
+    We have a default value of <code>spark.kubernetes.kerberos.tokensecret.itemkey</code> should you not include it. But
+    you should always include this if you are proposing a pre-existing secret contain the delegation token data.
   <td><code>spark.executorEnv.[EnvironmentVariableName]</code></td> 
   <td>(none)</td>
   <td>
@@ -799,31 +823,19 @@ from the other deployment modes. See the [configuration page](configuration.html
   </td>
 </tr>
 <tr>
-  <td><code>spark.kubernetes.client.watch.reconnectIntervalInMs</code></td>
-  <td><code>1s</code></td>
+  <td><code>spark.kubernetes.driver.secrets.[SecretName]</code></td>
+  <td>(none)</td>
   <td>
-    Connection retry interval for kubernetes client requests.
+    Mounts the Kubernetes secret named <code>SecretName</code> onto the path specified by the value
+    in the driver Pod. The user can specify multiple instances of this for multiple secrets.
   </td>
 </tr>
 <tr>
-  <td><code>spark.kubernetes.client.watch.reconnectLimit</code></td>
-  <td><code>-1</code></td>
+  <td><code>spark.kubernetes.executor.secrets.[SecretName]</code></td>
+  <td>(none)</td>
   <td>
-    Limit of times connections can be attempted for kubernetes client requests.
-  </td>
-</tr>
-<tr>
-  <td><code>spark.kubernetes.client.connection.timeoutInMs</code></td>
-  <td><code>10s</code></td>
-  <td>
-    Connection timeout for kubernetes client requests.
-  </td>
-</tr>
-<tr>
-  <td><code>spark.kubernetes.client.request.timeoutInMs</code></td>
-  <td><code>10s</code></td>
-  <td>
-    Request timeout for kubernetes client requests.
+    Mounts the Kubernetes secret named <code>SecretName</code> onto the path specified by the value
+    in the executor Pods. The user can specify multiple instances of this for multiple secrets.
   </td>
 </tr>
 </table>
@@ -834,4 +846,3 @@ from the other deployment modes. See the [configuration page](configuration.html
 Running Spark on Kubernetes is currently an experimental feature. Some restrictions on the current implementation that
 should be lifted in the future include:
 * Applications can only run in cluster mode.
-* Only Scala and Java applications can be run.

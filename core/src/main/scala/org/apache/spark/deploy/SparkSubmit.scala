@@ -346,8 +346,6 @@ object SparkSubmit extends CommandLineUtils {
     (clusterManager, deployMode) match {
       case (KUBERNETES, CLIENT) =>
         printErrorAndExit("Client mode is currently not supported for Kubernetes.")
-      case (KUBERNETES, CLUSTER) if args.isR =>
-        printErrorAndExit("Kubernetes does not currently support R applications.")
       case (STANDALONE, CLUSTER) if args.isPython =>
         printErrorAndExit("Cluster deploy mode is currently not supported for python " +
           "applications on standalone clusters.")
@@ -485,20 +483,20 @@ object SparkSubmit extends CommandLineUtils {
         sysProp = "spark.kubernetes.namespace"),
 
         // Other options
-      OptionAssigner(args.executorCores, STANDALONE | YARN, ALL_DEPLOY_MODES,
+      OptionAssigner(args.executorCores, STANDALONE | YARN | KUBERNETES, ALL_DEPLOY_MODES,
         sysProp = "spark.executor.cores"),
-      OptionAssigner(args.executorMemory, STANDALONE | MESOS | YARN, ALL_DEPLOY_MODES,
+      OptionAssigner(args.executorMemory, STANDALONE | MESOS | YARN | KUBERNETES, ALL_DEPLOY_MODES,
         sysProp = "spark.executor.memory"),
-      OptionAssigner(args.totalExecutorCores, STANDALONE | MESOS, ALL_DEPLOY_MODES,
+      OptionAssigner(args.totalExecutorCores, STANDALONE | MESOS | KUBERNETES, ALL_DEPLOY_MODES,
         sysProp = "spark.cores.max"),
       OptionAssigner(args.files, LOCAL | STANDALONE | MESOS | KUBERNETES, ALL_DEPLOY_MODES,
         sysProp = "spark.files"),
       OptionAssigner(args.jars, LOCAL, CLIENT, sysProp = "spark.jars"),
       OptionAssigner(args.jars, STANDALONE | MESOS | KUBERNETES, ALL_DEPLOY_MODES,
         sysProp = "spark.jars"),
-      OptionAssigner(args.driverMemory, STANDALONE | MESOS | YARN, CLUSTER,
+      OptionAssigner(args.driverMemory, STANDALONE | MESOS | YARN | KUBERNETES, CLUSTER,
         sysProp = "spark.driver.memory"),
-      OptionAssigner(args.driverCores, STANDALONE | MESOS | YARN, CLUSTER,
+      OptionAssigner(args.driverCores, STANDALONE | MESOS | YARN | KUBERNETES, CLUSTER,
         sysProp = "spark.driver.cores"),
       OptionAssigner(args.supervise.toString, STANDALONE | MESOS, CLUSTER,
         sysProp = "spark.driver.supervise"),
@@ -575,7 +573,7 @@ object SparkSubmit extends CommandLineUtils {
     }
 
     // assure a keytab is available from any place in a JVM
-    if (clusterManager == YARN || clusterManager == LOCAL) {
+    if (clusterManager == YARN || clusterManager == KUBERNETES || clusterManager == LOCAL) {
       if (args.principal != null) {
         require(args.keytab != null, "Keytab must be specified when principal is specified")
         if (!new File(args.keytab).exists()) {
@@ -635,13 +633,16 @@ object SparkSubmit extends CommandLineUtils {
     }
 
     if (isKubernetesCluster) {
-      childMainClass = "org.apache.spark.deploy.kubernetes.submit.Client"
+      childMainClass = "org.apache.spark.deploy.k8s.submit.Client"
       if (args.isPython) {
         childArgs ++= Array("--primary-py-file", args.primaryResource)
         childArgs ++= Array("--main-class", "org.apache.spark.deploy.PythonRunner")
         if (args.pyFiles != null) {
           childArgs ++= Array("--other-py-files", args.pyFiles)
         }
+      } else if (args.isR) {
+        childArgs ++= Array("--primary-r-file", args.primaryResource)
+        childArgs ++= Array("--main-class", "org.apache.spark.deploy.RRunner")
       } else {
         childArgs ++= Array("--primary-java-resource", args.primaryResource)
         childArgs ++= Array("--main-class", args.mainClass)
